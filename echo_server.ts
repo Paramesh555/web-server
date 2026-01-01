@@ -1,8 +1,10 @@
 import * as net from "net";
 
+//to run the file npx ts-node echo_server.ts
+//to run the client nc 127.0.0.1 1234
 let server = net.createServer();
 
-
+//using callback
 function newConn(socket: net.Socket): void{
     console.log('new connection', socket.remoteAddress, socket.remotePort);
 
