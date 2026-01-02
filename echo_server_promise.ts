@@ -10,6 +10,15 @@ type TCPConn = {
     }
 }
 
+type TCPListner = {
+    server: net.Server;
+    err: null | Error;
+    accepter: null | {
+        resolve: (conn: TCPConn) => void;
+        reject: (err: Error) => void;
+    };
+};
+
 //create a wrapper
 function soInit(socket: net.Socket): TCPConn {
     const conn: TCPConn = {
@@ -92,7 +101,7 @@ async function serveClient(socket: net.Socket): Promise<void> {
     }
 }
 
-async function newConn(socket: net.Socket){
+async function newConn(socket: net.Socket) {
     console.log('new connection', socket.remoteAddress, socket.remotePort);
     try {
         await serveClient(socket);
@@ -103,12 +112,60 @@ async function newConn(socket: net.Socket){
     }
 }
 
-const server = net.createServer({
-    pauseOnConnect: true,   // required by `TCPConn`
-});
+function soListen(host: string, port: number): TCPListner {
+    const server = net.createServer({
+        pauseOnConnect: true,   // required by `TCPConn`
+    });
 
-server.on('error', (err: Error) => { throw err; });
-server.on('connection', newConn);
-server.listen({host: '127.0.0.1', port: 1234});
+    const listener: TCPListner = {
+        server,
+        err: null,
+        accepter: null,
+    };
+
+    server.on('connection', (socket) => {
+        const conn = soInit(socket);
+
+        listener.accepter?.resolve(conn);
+        listener.accepter = null;
+    });
+
+    server.on('error', (err) => {
+        listener.err = err;
+        if (listener.accepter) {
+            listener.accepter.reject(err);
+            listener.accepter = null;
+        }
+    });
+
+    server.listen({ host, port });
+    return listener;
+
+}
+
+function soAccept(listener: TCPListner): Promise<TCPConn> {
+    return new Promise((resolve, reject) => {
+        if (listener.err) {
+            reject(listener.err);
+            return;
+        }
+
+        listener.accepter = { resolve, reject };
+    });
+
+}
+
+async function main() {
+    const listener = soListen("127.0.0.1", 1234);
+
+    while (true) {
+        const conn = await soAccept(listener);
+        serveClient(conn.socket); // fire-and-forget
+    }
+}
+
+main().catch(err => {
+    console.error("fatal:", err);
+});
 
 
