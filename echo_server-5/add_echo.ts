@@ -24,6 +24,7 @@ type TCPListner = {
 type DynBuf = {
     data: Buffer;     // allocated memory
     size: number;     // bytes actually used
+    start: number;    // start of unread data
 };
 
 /* ===================== TCPConn ===================== */
@@ -62,7 +63,6 @@ function soInit(socket: net.Socket): TCPConn {
 }
 
 /* ===================== Buffer Helpers ===================== */
-
 function bufPush(buf: DynBuf, data: Buffer) {
     const newLen = buf.size + data.length;
 
@@ -73,33 +73,41 @@ function bufPush(buf: DynBuf, data: Buffer) {
         }
 
         const grown = Buffer.alloc(cap);
-        buf.data.copy(grown, 0, 0);
+        //here we can remove the already read data
+        buf.data.copy(grown, 0, 0, buf.size);
+
         buf.data = grown;
     }
-
-    data.copy(buf.data, buf.size);
+    data.copy(buf.data, buf.size); //copy(dst, dstStart, srcStart)
     buf.size = newLen;
 }
 
 function bufPop(buf: DynBuf, len: number) {
-    buf.data.copyWithin(0, len, buf.size);
-    buf.size -= len;
+    //only do copywithin when the capacity reaches the half
+    if (buf.start > buf.data.length / 2) {
+        buf.data.copyWithin(0, len, buf.size); //buf.copyWithin(dst, src_start, src_end)
+        buf.size -= len;
+        buf.start = 0;
+    }else{
+        buf.start += len;
+    }
 }
 
 function cutMessage(buf: DynBuf): Buffer | null {
-    const idx = buf.data
-        .subarray(0, buf.size)
+    const relativeIdx = buf.data
+        .subarray(buf.start, buf.size)
         .indexOf("\n");
 
-    if (idx < 0) {
+    if (relativeIdx < 0) {
         return null;
     }
+    const absoluteIdx = relativeIdx + buf.start;
 
     const msg = Buffer.from(
-        buf.data.subarray(0, idx + 1)
+        buf.data.subarray(buf.start, absoluteIdx + 1)
     );
 
-    bufPop(buf, idx + 1);
+    bufPop(buf, relativeIdx + 1);
     return msg;
 }
 
@@ -143,6 +151,7 @@ async function serveClient(socket: net.Socket): Promise<void> {
     const buf: DynBuf = {
         data: Buffer.alloc(0),
         size: 0,
+        start:0,
     };
 
     while (true) {
