@@ -52,6 +52,17 @@ type HTTPRes = {
     body: BodyReader,
 };
 
+//an HTTP Error class
+class HTTPError{
+    errorCode: number;
+    error: string
+
+    constructor(errorCode: number, error: string){
+        this.errorCode = errorCode;
+        this.error = error;
+    }
+}
+
 /* ===================== TCPConn ===================== */
 
 function soInit(socket: net.Socket): TCPConn {
@@ -166,20 +177,20 @@ function parseHTTPReq(data: Buffer): HTTPReq {
 }
 
 function validateHeader(line: Buffer): boolean {
-  // reject embedded CR or LF
-  if (line.indexOf(0x0d) !== -1 || line.indexOf(0x0a) !== -1) {
-    return false;
-  }
+    // reject embedded CR or LF
+    if (line.indexOf(0x0d) !== -1 || line.indexOf(0x0a) !== -1) {
+        return false;
+    }
 
-  const colonIdx = line.indexOf(0x3a); // ':'
+    const colonIdx = line.indexOf(0x3a); // ':'
 
-  // must have a colon and non-empty name
-  if (colonIdx <= 0) {
-    return false;
-  }
+    // must have a colon and non-empty name
+    if (colonIdx <= 0) {
+        return false;
+    }
 
-  // allow anything in value (simple validation)
-  return true;
+    // allow anything in value (simple validation)
+    return true;
 }
 
 
@@ -216,6 +227,59 @@ function splitwithgivenRegex(data: Buffer, regex: Buffer): Buffer[] {
     return lines;
 }
 
+function readerFromReq(conn: TCPConn, buf: DynBuf, req: HTTPReq): BodyReader {
+    let bodyLen = -1;
+    const contentLen = fieldGet(req.headers, 'Content-Length');
+    if (contentLen) {
+        bodyLen = parseDec(contentLen.toString('latin1'));
+        if (isNaN(bodyLen)) {
+            throw new HTTPError(400, 'bad Content-Length.');
+        }
+    }
+    const bodyAllowed = !(req.method === 'GET' || req.method === 'HEAD');
+
+    const chunked = fieldGet(req.headers, 'Transfer-Encoding')?.equals(Buffer.from('chunked')) || false;
+    if (!bodyAllowed && (bodyLen > 0 || chunked)) {
+        throw new HTTPError(400, 'http body not allowed');
+    }
+
+    if (!bodyAllowed) {
+        bodyLen = 0;
+    }
+
+    if (bodyLen >= 0) {
+        // "Content-Length" is present
+        return readerFromConnLength(conn, buf, bodyLen);
+    } else if (chunked) {
+        // chunked encoding
+        throw new HTTPError(501, 'TODO');
+    } else {
+        // read the rest of the connection
+        throw new HTTPError(501, 'TODO');
+    }
+
+}
+
+function readerFromConnLength(conn:TcpConn, buf: DynBuf, length: number): BodyReader {
+    
+}
+
+function fieldGet(headers: Buffer[], key: string): null | Buffer {
+    const lowerKey = key.toLowerCase();
+
+    for (const line of headers) {
+        const str = line.toString();
+
+        const idx = str.indexOf(':');
+        const headerKey = str.substring(0,idx);
+        if(headerKey === lowerKey){
+            return Buffer.from(str.substring(idx+1));
+        }
+
+    }
+    return null;
+}
+
 /* ===================== Socket IO ===================== */
 
 function soRead(conn: TCPConn): Promise<Buffer> {
@@ -235,19 +299,9 @@ function soRead(conn: TCPConn): Promise<Buffer> {
     });
 }
 
-function soWrite(conn: TCPConn, data: Buffer): Promise<void> {
-    return new Promise((resolve, reject) => {
-        if (conn.err) {
-            reject(conn.err);
-            return;
-        }
 
-        conn.socket.write(data, (err) => {
-            if (err) reject(err);
-            else resolve();
-        });
-    });
-}
+
+
 
 /* ===================== Echo Server ===================== */
 
