@@ -163,7 +163,7 @@ function parseHTTPReq(data: Buffer): HTTPReq {
     const headers: Buffer[] = [];
     // the header ends by an empty line
     for (let i = 1; i < lines.length - 1; i++) {
-        const h = Buffer.from(i);
+        const h = Buffer.from(headers[i]);
         if (!validateHeader(h)) {
             throw new HTTPError(400, 'bad field');
         }
@@ -260,8 +260,31 @@ function readerFromReq(conn: TCPConn, buf: DynBuf, req: HTTPReq): BodyReader {
 
 }
 
-function readerFromConnLength(conn:TcpConn, buf: DynBuf, length: number): BodyReader {
-    
+function readerFromConnLength(conn:TCPConn, buf: DynBuf, remain: number): BodyReader {
+    return {
+        length: remain,
+        read: async(): Promise<Buffer> => {
+            if(remain === 0){
+                return Buffer.from(''); //done
+            }
+
+            if(buf.size === 0){
+                //need to get more data
+                const data = await soRead(conn);
+                bufPush(buf,data);
+                if(data.length === 0){
+                    //error
+                    throw new Error('Unexpected EOF from HTTP body');
+                }
+            }
+            //consume data from buffer
+            const consume = Math.min(buf.size,remain);
+            remain -= consume;
+            const data = Buffer.from(buf.data.subarray(0, consume));
+            bufPop(buf,consume);
+            return data;
+        }
+    }
 }
 
 function fieldGet(headers: Buffer[], key: string): null | Buffer {
@@ -279,6 +302,45 @@ function fieldGet(headers: Buffer[], key: string): null | Buffer {
     }
     return null;
 }
+
+
+function handleReq(reqHeader: HTTPReq, reqBody: BodyReader): Promise<HTTPRes>{
+    let resp: BodyReader;
+    switch(reqHeader.uri.toString('latin1')){
+        case '/echo':
+            resp = reqBody;
+            break;
+        default:
+            resp = readerFromMemory(Buffer.from('hello world\n'));
+            break;
+    }
+
+    return {
+        code: 200,
+        headers: [Buffer.from('server: my_first_http_server')],
+        body:resp,
+    };
+}
+
+function readerFromMemory(data: Buffer): BodyReader{
+    let done = false;
+    return{
+        length: data.length,
+        read: async(): Promise<Buffer> => {
+            if(done){
+                return Buffer.from('');
+            }else{
+                done = true;
+                return data;
+            }
+        }
+    };
+}
+
+function writeHTTPResp(conn: TCPConn, resp: HTTPRes): Promise<void>{
+    
+}
+
 
 /* ===================== Socket IO ===================== */
 
@@ -298,8 +360,6 @@ function soRead(conn: TCPConn): Promise<Buffer> {
         conn.socket.resume();
     });
 }
-
-
 
 
 
