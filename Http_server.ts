@@ -52,6 +52,19 @@ type HTTPRes = {
     body: BodyReader,
 };
 
+const reasonTable: Record<number, string> = {
+        200: "OK",
+        201: "Created",
+        204: "No Content",
+        301: "Moved Permanently",
+        302: "Found",
+        400: "Bad Request",
+        401: "Unauthorized",
+        403: "Forbidden",
+        404: "Not Found",
+        500: "Internal Server Error",
+};
+
 //an HTTP Error class
 class HTTPError{
     errorCode: number;
@@ -337,8 +350,29 @@ function readerFromMemory(data: Buffer): BodyReader{
     };
 }
 
-function writeHTTPResp(conn: TCPConn, resp: HTTPRes): Promise<void>{
+function encodeHTTPResp(resp: HTTPRes): Buffer {
+    const version = "HTTP/1.1";
+    const reason = reasonTable[resp.code];
+
+    const statusLine = `${version} ${resp.code} ${reason}\r\n`;
     
+}
+
+async function writeHTTPResp(conn: TCPConn, resp: HTTPRes): Promise<void>{
+    if(resp.body.length < 0){
+        throw new Error('TODO: chunked encoding');
+    }
+
+    resp.headers.push(Buffer.from('Content-Length: ${resp.body.length}'));
+    await soWrite(conn, encodeHTTPResp(resp));
+    
+    while(true){
+        const data = await resp.body.read();
+        if(data.length ==0){
+            break;
+        }
+        await soWrite(conn,data);
+    }
 }
 
 
@@ -358,6 +392,20 @@ function soRead(conn: TCPConn): Promise<Buffer> {
 
         conn.reader = { resolve, reject };
         conn.socket.resume();
+    });
+}
+
+function soWrite(conn: TCPConn, data: Buffer): Promise<void> {
+    return new Promise((resolve, reject) => {
+        if (conn.err) {
+            reject(conn.err);
+            return;
+        }
+
+        conn.socket.write(data, (err) => {
+            if (err) reject(err);
+            else resolve();
+        });
     });
 }
 
