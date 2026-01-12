@@ -273,6 +273,26 @@ function readerFromReq(conn: TCPConn, buf: DynBuf, req: HTTPReq): BodyReader {
 
 }
 
+
+function parseDec(s: string): number {
+    // empty value is invalid
+    if (s.length === 0) {
+        return NaN;
+    }
+
+    // validate all characters are digits
+    for (let i = 0; i < s.length; i++) {
+        const c = s.charCodeAt(i);
+        if (c < 48 || c > 57) { // '0'..'9'
+            return NaN;
+        }
+    }
+
+    // safe parse since we already validated digits
+    return Number(s);
+}
+
+
 function readerFromConnLength(conn:TCPConn, buf: DynBuf, remain: number): BodyReader {
     return {
         length: remain,
@@ -317,7 +337,7 @@ function fieldGet(headers: Buffer[], key: string): null | Buffer {
 }
 
 
-function handleReq(reqHeader: HTTPReq, reqBody: BodyReader): Promise<HTTPRes>{
+async function handleReq(reqHeader: HTTPReq, reqBody: BodyReader): Promise<HTTPRes>{
     let resp: BodyReader;
     switch(reqHeader.uri.toString('latin1')){
         case '/echo':
@@ -355,7 +375,15 @@ function encodeHTTPResp(resp: HTTPRes): Buffer {
     const reason = reasonTable[resp.code];
 
     const statusLine = `${version} ${resp.code} ${reason}\r\n`;
-    
+    const headerBlock = resp.headers
+    .map(h => h.toString("utf-8"))
+    .join("\r\n");
+
+
+    const finalText = statusLine + headerBlock + "\r\n\r\n";
+
+    return Buffer.from(finalText,"utf-8");
+
 }
 
 async function writeHTTPResp(conn: TCPConn, resp: HTTPRes): Promise<void>{
@@ -503,9 +531,9 @@ async function main() {
             if (exc instanceof HTTPError) {
                 // intended to send an error response
                 const resp: HTTPRes = {
-                    code: exc.code,
+                    code: exc.errorCode,
                     headers: [],
-                    body: readerFromMemory(Buffer.from(exc.message + '\n')),
+                    body: readerFromMemory(Buffer.from(exc.error + '\n')),
                 };
                 try {
                     await writeHTTPResp(conn, resp);
