@@ -301,7 +301,7 @@ function readerFromConnLength(conn:TCPConn, buf: DynBuf, remain: number): BodyRe
                 return Buffer.from(''); //done
             }
 
-            if(buf.size === 0){
+            if(buf.start === buf.start){
                 //need to get more data
                 const data = await soRead(conn);
                 bufPush(buf,data);
@@ -311,9 +311,11 @@ function readerFromConnLength(conn:TCPConn, buf: DynBuf, remain: number): BodyRe
                 }
             }
             //consume data from buffer
-            const consume = Math.min(buf.size,remain);
+            const unread = buf.size - buf.start;
+
+            const consume = Math.min(unread, remain);
             remain -= consume;
-            const data = Buffer.from(buf.data.subarray(0, consume));
+            const data = Buffer.from(buf.data.subarray(buf.start, buf.start + consume));
             bufPop(buf,consume);
             return data;
         }
